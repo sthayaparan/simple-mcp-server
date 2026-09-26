@@ -20,11 +20,15 @@ MVP of a Streamable HTTP MCP server (FastAPI + FastMCP) exposing member lookup t
 | ASGI server     | Uvicorn                                       |
 | Testing         | pytest, pytest-asyncio, httpx                 |
 | Lint            | pylint (dev dependency)                       |
+| CI              | GitHub Actions (`.github/workflows/ci.yml`)   |
 
 ## Project Layout
 
 ```
 simple-mcp-server/
+  .github/
+    workflows/
+      ci.yml         # GitHub Actions: test, lint, script smoke test
   .gitignore
   .python-version
   pyproject.toml
@@ -115,10 +119,20 @@ simple-mcp-server/
 - [x] Manual check: `/health` responds; an MCP client over Streamable HTTP at `http://127.0.0.1:8000/mcp` lists the 3 tools and calls each one successfully (Claude Code connects with `claude mcp add --transport http members http://127.0.0.1:8000/mcp`)
 - [x] Server left running and ready for the user
 
+### Phase 8 - Continuous Integration
+
+- [x] `.github/workflows/ci.yml` runs on push and pull request to `main`
+- [x] Uses `actions/checkout@v7` and `astral-sh/setup-uv@v7` (uv cache enabled); Python from `.python-version`
+- [x] `uv sync --locked` fails the build if `uv.lock` is out of date
+- [x] Runs `uv run pytest` and `uv run pylint src tests`
+- [x] Smoke-tests the Linux service scripts: `start.sh` -> `/health` ok -> `stop.sh`
+- [x] Same commands verified locally (15 tests pass, pylint 10.00/10)
+- [ ] First workflow run on GitHub is green (after push)
+
 ## Recommendations (Out of Scope)
 
 - Consider ruff for future work: a single fast tool for both linting and formatting, which could replace Pylint and add the formatting step Pylint does not provide.
 
 ## Definition of Done
 
-All phase checkboxes ticked, full test suite green, lint clean, and the server running at `http://127.0.0.1:8000/mcp`.
+All phase checkboxes ticked, full test suite green, lint clean, CI green on GitHub, and the server running at `http://127.0.0.1:8000/mcp`.

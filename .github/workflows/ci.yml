@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest
+      - run: uv run pylint src tests
+      - name: Service scripts smoke test
+        run: |
+          sh scripts/start.sh
+          curl --retry 10 --retry-connrefused --retry-delay 1 -fsS http://127.0.0.1:8000/health
+          sh scripts/stop.sh
