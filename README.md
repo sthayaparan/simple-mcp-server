@@ -28,6 +28,21 @@ Or in the foreground: `uv run uvicorn member_mcp.main:app --port 8000`
 claude mcp add --transport http members http://127.0.0.1:8000/mcp
 ```
 
+## Agent console
+
+Console agent that answers member questions using an OpenRouter LLM (`openai/gpt-oss-120b`) and the MCP tools.
+
+1. Copy `.env.example` to `.env` and set `OPENROUTER_API_KEY`
+2. Start the server (above)
+3. Run the agent:
+
+```
+scripts\start-agent.ps1    # Windows, opens a new console (stop: scripts\stop-agent.ps1)
+./scripts/start-agent.sh   # Linux, runs in this terminal (stop: ./scripts/stop-agent.sh)
+```
+
+Or directly: `uv run python -m agent`. Type `exit` to quit. The conversation history is appended to `context_history.txt`.
+
 ## Test and lint
 
 ```

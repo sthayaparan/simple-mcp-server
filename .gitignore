@@ -20,6 +20,9 @@ htmlcov/
 *.pid
 *.log
 
+# Agent conversation history
+context_history.txt
+
 # IDE / OS
 .vscode/
 .idea/

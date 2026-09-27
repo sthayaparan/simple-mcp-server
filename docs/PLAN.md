@@ -129,10 +129,101 @@ simple-mcp-server/
 - [x] Same commands verified locally (15 tests pass, pylint 10.00/10)
 - [ ] First workflow run on GitHub is green (after push)
 
+## Agent Console
+
+Simple Python console agent that takes a user prompt, sends it together with the member MCP tool definitions to an LLM via OpenRouter, runs whichever tools the LLM chooses against `http://127.0.0.1:8000/mcp`, and prints the final answer.
+
+### Agent Tech Stack
+
+| Concern    | Choice                                                                 |
+|------------|------------------------------------------------------------------------|
+| LLM access | OpenRouter via the `openai` SDK (`AsyncOpenAI`, `base_url="https://openrouter.ai/api/v1"`) |
+| Model      | `openai/gpt-oss-120b`                                                  |
+| MCP client | `fastmcp.Client` over Streamable HTTP (already a dependency)           |
+| Config     | `python-dotenv`, reads `OPENROUTER_API_KEY` from `.env`                |
+
+### Agent Layout
+
+```
+src/
+  agent/
+    __init__.py
+    __main__.py    # entry point: asyncio.run(main())
+    main.py        # config, tool conversion, LLM/tool loop, console loop
+scripts/
+  start-agent.ps1, stop-agent.ps1   # Windows
+  start-agent.sh, stop-agent.sh     # Linux
+tests/
+  test_agent.py
+.env.example       # OPENROUTER_API_KEY=
+```
+
+The `agent` folder sits next to `member_mcp` under `src/` so it uses the same src layout and packaging.
+
+### Agent Design
+
+- Config: `load_dotenv()`. `OPENROUTER_API_KEY` is required. `MODEL = "openai/gpt-oss-120b"` and `MCP_URL = "http://127.0.0.1:8000/mcp"` are module constants.
+- `to_openai_tools(tools)`: converts each MCP tool (`name`, `description`, `inputSchema`) to an OpenAI function tool `{"type": "function", "function": {"name", "description", "parameters"}}`.
+- `ask(llm, mcp, tools, messages) -> str`: calls `chat.completions.create(model, messages, tools)`. If the reply has `tool_calls`, it runs each one with `mcp.call_tool(name, json.loads(arguments))`, appends the result as a `role="tool"` message, and calls the LLM again. When the reply has no tool calls, it returns the reply text.
+- Conversation history is kept on the agent side, because the chat completions API is stateless. `main()` holds one in-memory `messages` list for the session. The list collects the user prompts, the assistant tool-call messages, the `tool` result messages and the final assistant answers, and it is sent in full on every LLM call. This lets follow-up questions work. The in-memory history is lost when the console exits, but it is also written to a file for later review (see below).
+- History file: `HISTORY_FILE = <project root>/context_history.txt`, opened in append mode so earlier sessions are kept.
+  - At session start, `main()` writes a header line: `=== Session <ISO timestamp> ===`.
+  - After each turn, `append_history(path, messages)` appends the messages added in that turn: the user prompt, the assistant tool calls, the tool results and the final answer.
+  - Each message is written as one JSON line, with SDK message objects converted via `model_dump(exclude_none=True)`.
+  - The file is in `.gitignore`.
+- `main()`: opens `fastmcp.Client(MCP_URL)` and lists the tools once. It then loops: `input("> ")`, appends the prompt to `messages`, calls `ask`, and prints the answer. Typing `exit`/`quit` or pressing Ctrl+C/Ctrl+D ends the session.
+- Run: `uv run python -m agent` (the MCP server must be running).
+- Scripts: the console is interactive, so it has to run in a terminal.
+  - `start-agent.ps1` runs `uv sync`, then opens the agent in a new console window with `Start-Process` and writes `agent.pid`.
+  - `start-agent.sh` runs `uv sync`, writes its own PID to `agent.pid`, and then `exec`s the agent in the current terminal.
+  - `stop-agent.ps1` / `stop-agent.sh` kill the PID in `agent.pid` and remove the file.
+
+### Phase 9 - Agent Scaffolding
+
+- [x] Runtime deps added: `openai`, `python-dotenv`
+- [x] `src/agent` package created and included in the build (`uv run python -m agent` resolves)
+- [x] `.env.example` added with `OPENROUTER_API_KEY=`; `.env` confirmed in `.gitignore`
+- [x] `agent.pid` and `context_history.txt` added to `.gitignore`
+
+### Phase 10 - Agent Implementation
+
+- [x] `to_openai_tools` converts the 3 MCP tools to OpenAI function-tool format
+- [x] `ask` runs the tool-call loop and returns the final text
+- [x] Session history (prompts, tool calls, tool results, answers) kept in `messages` and sent on every LLM call
+- [x] Each turn's messages appended to `context_history.txt` in the project root as JSON lines, under a per-session header
+- [x] Console loop reads prompts, prints answers, and exits cleanly on `exit`/`quit`/EOF
+
+### Phase 11 - Agent Unit Tests
+
+`tests/test_agent.py` (no network: MCP uses the in-memory `fastmcp.Client(mcp)`, and the LLM is a fake that returns scripted responses):
+
+- [x] `to_openai_tools` produces 3 function tools with the correct names, descriptions and parameter schemas
+- [x] `ask` with a direct answer (no tool calls) returns that text and makes no MCP calls
+- [x] `ask` with a `get_user_by_email` tool call runs the tool, sends the member JSON back as a `tool` message, and returns the final text
+- [x] `ask` handles several tool calls in one reply and in consecutive replies
+- [x] After `ask`, `messages` holds the assistant tool-call message, the matching `tool` result (same `tool_call_id`) and the final answer, in order
+- [x] A second prompt in the same session sends the full earlier history to the LLM
+- [x] `append_history` (writing to `tmp_path`) writes one valid JSON line per message, and appends on a second call instead of overwriting
+- [x] `uv run pytest` - all tests (server + agent) pass
+- [x] `uv run pylint src tests` - 10.00/10
+
+### Phase 12 - Agent Scripts and Manual Verification
+
+- [x] `scripts/start-agent.ps1` / `stop-agent.ps1` verified on Windows: start opens the console, stop closes it, and the PID file is removed
+- [x] `scripts/start-agent.sh` / `stop-agent.sh` pass `sh -n`
+- [x] Manual end-to-end check with a real `OPENROUTER_API_KEY` and the server running:
+  - [x] "List all members" calls `get_all_users` and prints 10 members
+  - [x] "What is the email of <name>?" calls `get_user_by_name` (in the run, the LLM answered the email from the earlier `get_all_users` result in history, then called `get_user_by_name` for the mobile follow-up)
+  - [x] "Who owns <email>?" calls `get_user_by_email`
+  - [x] A follow-up question (for example "What is their mobile?") is answered from the session history
+  - [x] An unknown name gets a sensible "not found" answer
+  - [x] `context_history.txt` in the project root contains the session header and every prompt, tool call, tool result and answer from the session
+- [x] README updated with a short Agent section: set up `.env`, start the server, run the agent
+
 ## Recommendations (Out of Scope)
 
 - Consider ruff for future work: a single fast tool for both linting and formatting, which could replace Pylint and add the formatting step Pylint does not provide.
 
 ## Definition of Done
 
-All phase checkboxes ticked, full test suite green, lint clean, CI green on GitHub, and the server running at `http://127.0.0.1:8000/mcp`.
+All phase checkboxes ticked, full test suite green, lint clean, CI green on GitHub, the server running at `http://127.0.0.1:8000/mcp`, and the agent console answering member questions through the MCP tools.
